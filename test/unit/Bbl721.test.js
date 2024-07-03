@@ -1,7 +1,6 @@
 const { expect, assert } = require("chai");
 const { developmentChains, testURI } = require("../../helper-hardhat.confg");
 const { network, getNamedAccounts, ethers, deployments } = require("hardhat");
-const { isCallTrace } = require("hardhat/internal/hardhat-network/stack-traces/message-trace");
 
 
 !developmentChains.includes(network.name) ? describe.skip :
@@ -26,6 +25,9 @@ const { isCallTrace } = require("hardhat/internal/hardhat-network/stack-traces/m
                 const updatedTokeIdCount = await bbl721.getTokenCounter();
 
                 assert(updatedTokeIdCount > tokenIdCount);
+            });
+            it("Should update the property data", async () => {
+
             });
         });
 
