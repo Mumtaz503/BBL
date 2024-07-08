@@ -9,7 +9,7 @@ const networkConfig = {
     },
 };
 
-const developmentChains = ["hardhat", "localhost"];
+const developmentChains = [ "hardhat", "localhost" ];
 const testURI = "ipfs://bafybeig37ioir76s7mg5oobetncojcm3c3hxasyd4rvid4jqhy4gkaheg4/?filename=0-PUG.json"; //Test URI
 
 module.exports = {

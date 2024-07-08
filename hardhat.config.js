@@ -1,10 +1,10 @@
-require("@nomicfoundation/hardhat-toolbox");
-require("@nomicfoundation/hardhat-verify");
-require("hardhat-gas-reporter");
-require("hardhat-deploy");
-require("@nomicfoundation/hardhat-ethers");
-require("hardhat-deploy-ethers");
-require("dotenv").config();
+require( "@nomicfoundation/hardhat-toolbox" );
+require( "@nomicfoundation/hardhat-verify" );
+require( "hardhat-gas-reporter" );
+require( "hardhat-deploy" );
+require( "@nomicfoundation/hardhat-ethers" );
+require( "hardhat-deploy-ethers" );
+require( "dotenv" ).config();
 
 const PRIVATE_KEY = process.env.PRIVATE_KEY;
 const SEPOLIA_RPC_URL = process.env.SEPOLIA_RPC_URL;
@@ -17,15 +17,15 @@ module.exports = {
   networks: {
     hardhat: {
       chainId: 31337,
-      // forking: {
-      //   url: MAINNET_RPC_URL,
-      //   blockNumber: 20211826,
-      // },
+      forking: {
+        url: MAINNET_RPC_URL,
+        blockNumber: 20211826,
+      },
       blockConfirmations: 1,
     },
     sepolia: {
       url: SEPOLIA_RPC_URL,
-      accounts: [PRIVATE_KEY],
+      accounts: [ PRIVATE_KEY ],
       chainId: 11155111,
       blockConfirmations: 6,
     },

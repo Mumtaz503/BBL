@@ -19,7 +19,6 @@ contract NormalRental is ERC1155, Ownable {
     }
 
     string private constant BASE_EXTENSION = ".json";
-    string public s_baseURI = "";
     uint256 private s_currentTokenID;
     bool public paused = true;
     uint256 public constant MAX_MINT_PER_PROPERTY = 100;
@@ -29,6 +28,8 @@ contract NormalRental is ERC1155, Ownable {
     mapping(uint256 => string) private s_tokenIdToTokenURIs;
     mapping(uint256 => Property) private s_tokenIdToProperties;
     mapping(uint256 => uint256) private s_tokenIdToRentGenerated;
+
+    event PropertyMinted(uint256 indexed tokenId_);
 
     ///////////////////////////////////////////
     //              Testing Done             //
@@ -46,14 +47,7 @@ contract NormalRental is ERC1155, Ownable {
         uint256 _price,
         uint256 _seed
     ) external onlyOwner {
-        // Possible block timestamp manipulation vulnerability here.
-        // Need to add a check for valid tokenURIs.
-        /**
-         * Must convert the uri in the hash form
-         * and check if the starting of that hash is the same as
-         * the hash of "ipfs://"
-         */
-
+        require(_isValidUri(_uri), "Please place a valid URI");
         require(_price > 0 && _seed > 0, "Please enter appropriate values");
         uint256 newTokenID = uniqueId(_seed, msg.sender);
         s_currentTokenID = newTokenID;
@@ -69,14 +63,14 @@ contract NormalRental is ERC1155, Ownable {
         });
 
         s_tokenIdToTokenURIs[newTokenID] = _uri;
+        emit PropertyMinted(newTokenID);
     }
 
     function mint(uint256 tokenId, uint256 amount) external {
         Property storage property = s_tokenIdToProperties[tokenId];
-        uint256 _remainingSupply = MAX_MINT_PER_PROPERTY -
-            property.amountMinted;
+        uint256 remainingSupply = MAX_MINT_PER_PROPERTY - property.amountMinted;
 
-        require(_remainingSupply > 0, "Not enough supply left");
+        require(remainingSupply > 0, "Not enough supply left");
         uint256 usdtAmount = (property.price * amount) / 100;
 
         require(
@@ -134,11 +128,30 @@ contract NormalRental is ERC1155, Ownable {
         return s_tokenIdToTokenURIs[_tokenId];
     }
 
-    function _isValidUri(string memory _uri) internal view returns (bool) {
-        bytes32 startsWith = keccak256(bytes("ipfs://"));
-        bytes32 endsWith = keccak256(bytes(BASE_EXTENSION));
+    function _isValidUri(string memory _uri) internal pure returns (bool) {
+        bytes memory startsWith = bytes("ipfs://");
+        bytes memory endsWith = bytes(BASE_EXTENSION);
+        bytes memory bytesUri = bytes(_uri);
 
-        // if(keccak256(bytes(_uri)))
+        if (bytesUri.length < startsWith.length + endsWith.length) {
+            return false;
+        }
+
+        for (uint256 i = 0; i < startsWith.length; i++) {
+            if (bytesUri[i] != startsWith[i]) {
+                return false;
+            }
+        }
+
+        for (uint256 i = 0; i < endsWith.length; i++) {
+            if (
+                bytesUri[bytesUri.length - endsWith.length + i] != endsWith[i]
+            ) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     function uniqueId(
