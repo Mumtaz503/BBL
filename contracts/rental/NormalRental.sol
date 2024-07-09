@@ -2,11 +2,16 @@
 pragma solidity ^0.8.24;
 
 import {ERC1155} from "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 contract NormalRental is ERC1155, Ownable {
     error NormalRental__TRANSFER_FAILED();
+    error NormalRental__TRANSFER_FAILED_mint();
+    error NormalRental__TRANSFER_FAILED_distributeRent();
+
+    using SafeERC20 for IERC20;
 
     IERC20 private immutable i_usdt;
     struct Property {
@@ -20,14 +25,16 @@ contract NormalRental is ERC1155, Ownable {
 
     string private constant BASE_EXTENSION = ".json";
     uint256 private s_currentTokenID;
-    bool public paused = true;
+    bool public paused = false;
     uint256 public constant MAX_MINT_PER_PROPERTY = 100;
     uint256 public constant DECIMALS = 10 ** 6;
-    // address tokenAddress = address(0xaA8E23Fb1079EA71e0a56F48a2aA51851D8433D0);
 
     mapping(uint256 => string) private s_tokenIdToTokenURIs;
     mapping(uint256 => Property) private s_tokenIdToProperties;
     mapping(uint256 => uint256) private s_tokenIdToRentGenerated;
+    mapping(address => mapping(uint256 => uint256))
+        private s_userToTokenIdToShares;
+    mapping(uint256 => address[]) private s_tokenIdToInvestors;
 
     event PropertyMinted(uint256 indexed tokenId_);
 
@@ -66,26 +73,49 @@ contract NormalRental is ERC1155, Ownable {
         emit PropertyMinted(newTokenID);
     }
 
-    function mint(uint256 tokenId, uint256 amount) external {
-        Property storage property = s_tokenIdToProperties[tokenId];
+    ///////////////////////////////////////////
+    //              Testing Done             //
+    ///////////////////////////////////////////
+    function mint(uint256 _tokenId, uint256 _amount) external {
+        require(paused == false, "Minting Paused");
+        require(_amount >= 1, "Min investment 1%");
+        Property storage property = s_tokenIdToProperties[_tokenId];
         uint256 remainingSupply = MAX_MINT_PER_PROPERTY - property.amountMinted;
 
-        require(remainingSupply > 0, "Not enough supply left");
-        uint256 usdtAmount = (property.price * amount) / 100;
+        require(remainingSupply >= _amount, "Not enough supply left");
+        uint256 usdtAmount = (property.price * _amount) / 100;
 
         require(
             i_usdt.balanceOf(msg.sender) > usdtAmount,
             "Not enough balance"
         );
-        i_usdt.transferFrom(msg.sender, address(this), usdtAmount);
-        uint256 _newAmoutnGenerated = property.amountGenerated + usdtAmount;
 
-        _mint(msg.sender, tokenId, amount, "");
-
-        property.amountGenerated = _newAmoutnGenerated;
-        property.amountMinted += 1;
+        //Approve first in the front-end / scripts
+        try this.attemptTransfer(msg.sender, address(this), usdtAmount) {
+            uint256 _newAmoutnGenerated = property.amountGenerated + usdtAmount;
+            property.amountGenerated = _newAmoutnGenerated;
+            property.amountMinted += _amount;
+            s_userToTokenIdToShares[msg.sender][_tokenId] += _amount;
+            /**Testing Required */
+            for (
+                uint256 i = 0;
+                i < s_tokenIdToInvestors[_tokenId].length;
+                i++
+            ) {
+                if (s_tokenIdToInvestors[_tokenId][i] != msg.sender) {
+                    s_tokenIdToInvestors[_tokenId].push(msg.sender);
+                }
+            }
+            /**Testing Required */
+            _mint(msg.sender, _tokenId, _amount, "");
+        } catch {
+            revert NormalRental__TRANSFER_FAILED_mint();
+        }
     }
 
+    ///////////////////////////////////////////
+    //              Testing Done             //
+    ///////////////////////////////////////////
     function submitRent(
         uint256 _usdtAmount,
         uint256 _tokenId
@@ -95,33 +125,46 @@ contract NormalRental is ERC1155, Ownable {
             "Not enough Balance"
         );
         require(
-            keccak256(bytes(s_tokenIdToTokenURIs[_tokenId])).length != 0,
+            bytes(s_tokenIdToTokenURIs[_tokenId]).length != 0,
             "Property not found"
         );
 
-        bool success = i_usdt.transferFrom(
-            msg.sender,
-            address(this),
-            _usdtAmount
-        );
-
-        if (success) {
+        //Approve first in the front-end / scripts
+        try this.attemptTransfer(msg.sender, address(this), _usdtAmount) {
             s_tokenIdToRentGenerated[_tokenId] += _usdtAmount;
-        } else {
+        } catch {
             revert NormalRental__TRANSFER_FAILED();
         }
     }
 
-    function _automatedRentDistribution(
-        uint256 responseId,
-        bytes calldata /*response*/
-    ) internal {}
+    function distributeRent(uint256 _tokenId) external onlyOwner {
+        require(s_tokenIdToRentGenerated[_tokenId] > 0, "Rent not generated");
+        for (uint256 i = 0; i < s_tokenIdToInvestors[_tokenId].length; i++) {
+            address investor = s_tokenIdToInvestors[_tokenId][i];
+            uint256 amountToSend = s_userToTokenIdToShares[investor][_tokenId];
+            try this.attemptTransfer(address(this), investor, amountToSend) {
+                s_userToTokenIdToShares[investor][_tokenId] -= amountToSend;
+            } catch {
+                revert NormalRental__TRANSFER_FAILED_distributeRent();
+            }
+        }
+    }
 
     function pause(bool _state) public onlyOwner {
         paused = _state;
     }
 
-    /** View and Pure helper functions */
+    /** Helper functions */
+    function attemptTransfer(
+        address _from,
+        address _to,
+        uint256 _amount
+    ) external {
+        require(msg.sender == address(this), "contract call only");
+        i_usdt.safeTransferFrom(_from, _to, _amount);
+    }
+
+    /** View and Pure functions */
     function uri(
         uint256 _tokenId
     ) public view override returns (string memory) {
@@ -185,5 +228,12 @@ contract NormalRental is ERC1155, Ownable {
         uint256 _tokenId
     ) public view returns (Property memory) {
         return s_tokenIdToProperties[_tokenId];
+    }
+
+    function getInvestments(
+        address _investor,
+        uint256 _tokenId
+    ) public view returns (uint256) {
+        return s_userToTokenIdToShares[_investor][_tokenId];
     }
 }
