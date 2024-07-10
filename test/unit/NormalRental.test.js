@@ -106,9 +106,6 @@ const { network, getNamedAccounts, ethers, deployments } = require( "hardhat" );
                 assert.equal( testURI.toLowerCase(), uri.toLowerCase() );
             } );
         } );
-        //////////////////////////////////////////////
-        //        View and Pure func Testing        //
-        //////////////////////////////////////////////
 
         describe( "submitRent function", function ()
         {
@@ -256,6 +253,17 @@ const { network, getNamedAccounts, ethers, deployments } = require( "hardhat" );
 
                 assert.equal( investorListing, amountToOwn );
             } );
+            it( "Should add the investor in the data structure if not already present", async () =>
+            {
+                const amountToOwn = BigInt( 5 );
+                const approvalAmount = ( price * amountToOwn ) / BigInt( 100 );
+
+                await usdt.approve( normalRental.target, approvalAmount * BigInt( 1e6 ) );
+                const tx = await normalRental.mint( tokenId, amountToOwn );
+
+                const investorsList = await normalRental.getInvestors( tokenId );
+                assert.equal( investorsList[ 0 ], deployer );
+            } );
             it( "Should mint the shares to the investor", async () =>
             {
                 const amountToOwn = BigInt( 5 );
@@ -269,6 +277,107 @@ const { network, getNamedAccounts, ethers, deployments } = require( "hardhat" );
                 assert.equal( investorBalance, amountToOwn );
             } );
         } );
+
+        describe( "distributeRent function", () =>
+        {
+            /**
+             * 1. We need an owner to add a property
+             * 2. We need an investor (user) to buy some usdt from uniswap
+             * 3. We need that investor to buy shares in the listed property
+             * 4. We need the owner to collect rent (buy some usdt from uniswap)
+             * 5. We need the owner to SUBMIT that rent
+             */
+            it( "Should revert if there is no rent generated", async () =>
+            {
+                await expect( normalRental.distributeRent( 2323n ) ).to.be.revertedWith( "Rent not generated" );
+            } );
+
+            let tokenId;
+            beforeEach( async () =>
+            {
+                // Owner adds a property
+                const price = BigInt( 34000 );
+                const seed = Math.floor( Math.random() * 9864 );
+
+                await normalRental.addProperty( testURI, price, seed );
+                const newTokenId = await normalRental.getTokenId();
+                tokenId = newTokenId;
+
+                const propertyListing = await normalRental.getProperties( newTokenId );
+                console.log( "Listed property: ", propertyListing );
+
+                // Investor buys some usdt
+                const amountOutMin = 30000n;
+                const path = [
+                    "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", //weth
+                    "0xdac17f958d2ee523a2206206994597c13d831ec7"  //usdt
+                ];
+
+                const deadline = Math.floor( Date.now() / 1000 ) + 60 * 10;
+                const transactionResponse = await routerV2.connect( userSigner ).swapExactETHForTokens(
+                    amountOutMin,
+                    path,
+                    user,
+                    deadline,
+                    {
+                        value: ethers.parseEther( "50" ),
+                    }
+                );
+                await transactionResponse.wait( 1 );
+                amountToSubmit = await usdt.balanceOf( user );
+                console.log( "Investor usdt balance: ", amountToSubmit );
+
+                // Investor buys shares in the property
+                const amountToOwn = BigInt( 5 );
+                const approvalAmount = ( price * amountToOwn ) / BigInt( 100 );
+                console.log( "Approval Amt: ", approvalAmount * BigInt( 1e6 ) );
+
+                await usdt.connect( userSigner ).approve( normalRental.target, approvalAmount * BigInt( 1e6 ) );
+                const tx = await normalRental.connect( userSigner ).mint( newTokenId, amountToOwn );
+                await tx.wait( 1 );
+                const investorListing = await normalRental.getInvestments( user, newTokenId );
+                console.log( "Investor Listing: ", investorListing );
+
+                // Mimicing rent collection
+                const amountOutMinOwner = 58000n;
+                const pathOwner = [
+                    "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", //weth
+                    "0xdac17f958d2ee523a2206206994597c13d831ec7"  //usdt
+                ];
+
+                const deadlineOwner = Math.floor( Date.now() / 1000 ) + 60 * 10;
+                const transactionResponseOwner = await routerV2.swapExactETHForTokens(
+                    amountOutMinOwner,
+                    pathOwner,
+                    deployer,
+                    deadlineOwner,
+                    {
+                        value: ethers.parseEther( "20" ),
+                    }
+                );
+                await transactionResponseOwner.wait( 1 );
+                amountToSubmit = await usdt.balanceOf( deployer );
+                console.log( "Owner usdt balance: ", amountToSubmit );
+
+                //Rent submission
+                await usdt.approve( normalRental.target, amountToSubmit );
+                await normalRental.submitRent( amountToSubmit, newTokenId );
+            } );
+            it( "Should distribute rent to the investors", async () =>
+            {
+                const userBal = await usdt.connect( userSigner ).balanceOf( user );
+                const tx = await normalRental.distributeRent( tokenId );
+                await tx.wait( 1 );
+
+                const userBalAfter = await usdt.connect( userSigner ).balanceOf( user );
+
+                assert( userBalAfter > userBal );
+            } );
+
+        } );
+        //////////////////////////////////////////////
+        //        View and Pure func Testing        //
+        //////////////////////////////////////////////
 
         /**
          * Make the _isValidUri() function public and uncomment the following lines to run the test

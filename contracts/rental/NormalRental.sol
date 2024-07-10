@@ -7,7 +7,7 @@ import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 
 contract NormalRental is ERC1155, Ownable {
-    error NormalRental__TRANSFER_FAILED();
+    error NormalRental__TRANSFER_FAILED_submitRent();
     error NormalRental__TRANSFER_FAILED_mint();
     error NormalRental__TRANSFER_FAILED_distributeRent();
 
@@ -96,17 +96,21 @@ contract NormalRental is ERC1155, Ownable {
             property.amountGenerated = _newAmoutnGenerated;
             property.amountMinted += _amount;
             s_userToTokenIdToShares[msg.sender][_tokenId] += _amount;
-            /**Testing Required */
+
+            bool isInvestorPresent = false;
             for (
                 uint256 i = 0;
                 i < s_tokenIdToInvestors[_tokenId].length;
                 i++
             ) {
-                if (s_tokenIdToInvestors[_tokenId][i] != msg.sender) {
-                    s_tokenIdToInvestors[_tokenId].push(msg.sender);
+                if (s_tokenIdToInvestors[_tokenId][i] == msg.sender) {
+                    isInvestorPresent = true;
+                    break;
                 }
             }
-            /**Testing Required */
+            if (!isInvestorPresent) {
+                s_tokenIdToInvestors[_tokenId].push(msg.sender);
+            }
             _mint(msg.sender, _tokenId, _amount, "");
         } catch {
             revert NormalRental__TRANSFER_FAILED_mint();
@@ -133,20 +137,21 @@ contract NormalRental is ERC1155, Ownable {
         try this.attemptTransfer(msg.sender, address(this), _usdtAmount) {
             s_tokenIdToRentGenerated[_tokenId] += _usdtAmount;
         } catch {
-            revert NormalRental__TRANSFER_FAILED();
+            revert NormalRental__TRANSFER_FAILED_submitRent();
         }
     }
 
+    ///////////////////////////////////////////
+    //              Testing Done             //
+    ///////////////////////////////////////////
     function distributeRent(uint256 _tokenId) external onlyOwner {
         require(s_tokenIdToRentGenerated[_tokenId] > 0, "Rent not generated");
         for (uint256 i = 0; i < s_tokenIdToInvestors[_tokenId].length; i++) {
             address investor = s_tokenIdToInvestors[_tokenId][i];
             uint256 amountToSend = s_userToTokenIdToShares[investor][_tokenId];
-            try this.attemptTransfer(address(this), investor, amountToSend) {
-                s_userToTokenIdToShares[investor][_tokenId] -= amountToSend;
-            } catch {
-                revert NormalRental__TRANSFER_FAILED_distributeRent();
-            }
+            i_usdt.safeTransfer(investor, amountToSend);
+            s_userToTokenIdToShares[investor][_tokenId] -= amountToSend;
+            s_tokenIdToRentGenerated[_tokenId] -= amountToSend;
         }
     }
 
@@ -213,7 +218,7 @@ contract NormalRental is ERC1155, Ownable {
             )
         );
 
-        return uniqueNumber;
+        return (uniqueNumber % 10 ** 20);
     }
 
     function getUsdtAddress() public view returns (IERC20) {
@@ -235,5 +240,11 @@ contract NormalRental is ERC1155, Ownable {
         uint256 _tokenId
     ) public view returns (uint256) {
         return s_userToTokenIdToShares[_investor][_tokenId];
+    }
+
+    function getInvestors(
+        uint256 _tokenId
+    ) public view returns (address[] memory) {
+        return s_tokenIdToInvestors[_tokenId];
     }
 }
