@@ -164,7 +164,7 @@ const { network, getNamedAccounts, ethers, deployments } = require( "hardhat" );
             {
                 price = BigInt( 20000 );
                 const seed = Math.floor( Math.random() * 7895 );
-                await normalRental.addProperty( testURI, price, seed );
+                await normalRental.addProperty( testURI, price, seed, false );
                 tokenId = await normalRental.getTokenId();
                 console.log( "token Id", tokenId );
 

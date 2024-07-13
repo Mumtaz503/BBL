@@ -5,12 +5,12 @@ const networkConfig = {
     },
     11155111: {
         name: "sepolia",
-        usdt: "0xaA8E23Fb1079EA71e0a56F48a2aA51851D8433D0",  //Sepolia USDT for testnet testing
+        usdt: "0x7169d38820dfd117c3fa1f22a697dba58d90ba06",  //Sepolia USDT for testnet testing
     },
 };
 
 const developmentChains = [ "hardhat", "localhost" ];
-const testURI = "ipfs://bafybeig37ioir76s7mg5oobetncojcm3c3hxasyd4rvid4jqhy4gkaheg4/?filename=0-PUG.json"; //Test URI
+const testURI = "https://nft.brickblock.estate/ipfs/bafkreiglx2wswxae5qsfp3pmlvt2qha4zjzqfyv5cncgcgqv4uwzhwfaiy/?filename=nft-668f108eac26f3feb9a96252.json"; //Test URI
 
 module.exports = {
     networkConfig,
