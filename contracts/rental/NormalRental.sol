@@ -36,6 +36,8 @@ contract NormalRental is ERC1155, Ownable {
     /* State Variables */
     string private constant BASE_EXTENSION = ".json";
     uint256 private s_currentTokenID;
+    uint256[] private s_tokenIdsNormal;
+    uint256[] private s_tokenIdsOffplan;
     bool public paused = false;
     uint256 public constant MAX_MINT_PER_PROPERTY = 100;
     uint256 public constant DECIMALS = 10 ** 6;
@@ -64,7 +66,7 @@ contract NormalRental is ERC1155, Ownable {
         s_currentTokenID = 0;
     }
 
-    //============================================================================================================//
+    //=================================Testing Done========================================//
 
     /**
      * Allows the owner to add a property listing either in offplan or normal category
@@ -93,6 +95,7 @@ contract NormalRental is ERC1155, Ownable {
         // If the owner sets the property as normal then the following logic executes
         if (_isOffPlan == false) {
             // A new instance of the mapping is created where all the property data is saved
+            s_tokenIdsNormal.push(newTokenID);
             s_tokenIdToProperties[newTokenID] = Property({
                 id: newTokenID,
                 price: priceDecimals,
@@ -109,6 +112,7 @@ contract NormalRental is ERC1155, Ownable {
             // If the owner sets the property as offplan then the following logic executes
         } else {
             // A different instance of mapping is created to save all the property data
+            s_tokenIdsOffplan.push(newTokenID);
             s_tokenIdToOffplanProperties[newTokenID] = Property({
                 id: newTokenID,
                 price: priceDecimals,
@@ -125,7 +129,7 @@ contract NormalRental is ERC1155, Ownable {
         }
     }
 
-    //============================================================================================================//
+    //=================================Testing Done========================================//
 
     /**
      * Allows the users to buy shares in normal rental properties that are ready to pay out rent
@@ -186,10 +190,12 @@ contract NormalRental is ERC1155, Ownable {
         }
     }
 
-    //============================================================================================================//
+    //=================================Testing Done========================================//
 
     /**
-     * Figure out what to do here.
+     * **Unit Testing incomplete**
+     * Testing done for all the checks.
+     * Remaining tests for effects and interactions
      */
     function mintOffplanInstallments(
         uint256 _tokenId,
@@ -197,7 +203,7 @@ contract NormalRental is ERC1155, Ownable {
         uint256 _firstInstalment
     ) external {
         require(
-            s_tokenIdToOffplanProperties[_tokenId].isOffplan = true,
+            getOffplanProperties(_tokenId).isOffplan == true,
             "Property not found"
         );
         require(_amountToOwn >= 1, "Max investment 1%");
@@ -209,44 +215,58 @@ contract NormalRental is ERC1155, Ownable {
         Property storage offplanProperty = s_tokenIdToOffplanProperties[
             _tokenId
         ];
-        uint256 remainingsupplyOffplan = MAX_MINT_PER_PROPERTY -
-            offplanProperty.amountGenerated;
+        unchecked {
+            uint256 firstInstalmentDecAdjusted = _firstInstalment * DECIMALS;
+            uint256 remainingsupplyOffplan = MAX_MINT_PER_PROPERTY -
+                offplanProperty.amountGenerated;
 
-        require(remainingsupplyOffplan >= _amountToOwn, "Not enough supply");
-        require(
-            i_usdt.balanceOf(msg.sender) >= (_firstInstalment * DECIMALS),
-            "Not enough balance"
-        );
+            require(
+                remainingsupplyOffplan >= _amountToOwn,
+                "Not enough supply"
+            );
+            require(
+                i_usdt.balanceOf(msg.sender) >= firstInstalmentDecAdjusted,
+                "Not enough balance"
+            );
 
-        try this.attemptTransfer(msg.sender, address(this), _firstInstalment) {
-            uint256 newAmountGeneratedOffplan = offplanProperty
-                .amountGenerated + _firstInstalment;
-            offplanProperty.amountGenerated = newAmountGeneratedOffplan;
-            offplanProperty.amountMinted += _amountToOwn;
+            try
+                this.attemptTransfer(
+                    msg.sender,
+                    address(this),
+                    firstInstalmentDecAdjusted
+                )
+            {
+                uint256 newAmountGeneratedOffplan = offplanProperty
+                    .amountGenerated + firstInstalmentDecAdjusted;
+                offplanProperty.amountGenerated = newAmountGeneratedOffplan;
+                offplanProperty.amountMinted += _amountToOwn;
 
-            uint256 amountToPay = (offplanProperty.price * _amountToOwn) / 100;
-            uint256 remainingInstalments = amountToPay - _firstInstalment;
+                uint256 amountToPay = (offplanProperty.price * _amountToOwn) /
+                    100;
+                uint256 remainingInstalments = amountToPay -
+                    firstInstalmentDecAdjusted;
 
-            s_tokenIdToInstallments[_tokenId].investor = msg.sender;
-            s_tokenIdToInstallments[_tokenId]
-                .remainingInstalmentsAmount = remainingInstalments;
+                s_tokenIdToInstallments[_tokenId].investor = msg.sender;
+                s_tokenIdToInstallments[_tokenId]
+                    .remainingInstalmentsAmount = remainingInstalments;
 
-            bool isInvestorPresent = false;
-            for (
-                uint256 i = 0;
-                i < s_tokenIdToInvestors[_tokenId].length;
-                i++
-            ) {
-                if (s_tokenIdToInvestors[_tokenId][i] == msg.sender) {
-                    isInvestorPresent = true;
-                    break;
-                } else {
-                    s_tokenIdToInvestors[_tokenId].push(msg.sender);
+                bool isInvestorPresent = false;
+                for (
+                    uint256 i = 0;
+                    i < s_tokenIdToInvestors[_tokenId].length;
+                    i++
+                ) {
+                    if (s_tokenIdToInvestors[_tokenId][i] == msg.sender) {
+                        isInvestorPresent = true;
+                        break;
+                    } else {
+                        s_tokenIdToInvestors[_tokenId].push(msg.sender);
+                    }
                 }
+                _mint(msg.sender, _tokenId, _amountToOwn, "");
+            } catch {
+                revert NormalRental__TRANSFER_FAILED_mintOffplanInstalments();
             }
-            _mint(msg.sender, _tokenId, _amountToOwn, "");
-        } catch {
-            revert NormalRental__TRANSFER_FAILED_mintOffplanInstalments();
         }
     }
 
@@ -311,25 +331,20 @@ contract NormalRental is ERC1155, Ownable {
         return s_tokenIdToTokenURIs[_tokenId];
     }
 
+    function offplanUri(uint256 _tokenId) public view returns (string memory) {
+        return s_offplanTokenIdToURIs[_tokenId];
+    }
+
     function _isValidUri(string memory _uri) internal pure returns (bool) {
-        bytes memory startsWith = bytes("https://nft.brick");
-        bytes memory endsWith = bytes(BASE_EXTENSION);
+        bytes memory startsWith = bytes("https://nft.brickblock");
         bytes memory bytesUri = bytes(_uri);
 
-        if (bytesUri.length < startsWith.length + endsWith.length) {
+        if (bytesUri.length < startsWith.length) {
             return false;
         }
 
         for (uint256 i = 0; i < startsWith.length; i++) {
             if (bytesUri[i] != startsWith[i]) {
-                return false;
-            }
-        }
-
-        for (uint256 i = 0; i < endsWith.length; i++) {
-            if (
-                bytesUri[bytesUri.length - endsWith.length + i] != endsWith[i]
-            ) {
                 return false;
             }
         }
@@ -364,10 +379,24 @@ contract NormalRental is ERC1155, Ownable {
         return s_currentTokenID;
     }
 
+    function getNormalTokenIds() public view returns (uint256[] memory) {
+        return s_tokenIdsNormal;
+    }
+
+    function getOffplanTokenIds() public view returns (uint256[] memory) {
+        return s_tokenIdsOffplan;
+    }
+
     function getProperties(
         uint256 _tokenId
     ) public view returns (Property memory) {
         return s_tokenIdToProperties[_tokenId];
+    }
+
+    function getOffplanProperties(
+        uint256 _tokenId
+    ) public view returns (Property memory) {
+        return s_tokenIdToOffplanProperties[_tokenId];
     }
 
     function getInvestments(
