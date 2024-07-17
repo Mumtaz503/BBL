@@ -116,7 +116,7 @@ contract NormalRental is ERC1155, Ownable {
         } else {
             // A different instance of mapping is created to save all the property data
             s_tokenIdsOffplan.push(newTokenID);
-            s_tokenIdToOffplanProperties[newTokenID] = Property({
+            s_tokenIdToProperties[newTokenID] = Property({
                 id: newTokenID,
                 price: priceDecimals,
                 owner: msg.sender,
@@ -205,7 +205,7 @@ contract NormalRental is ERC1155, Ownable {
         uint256 _firstInstalment
     ) external {
         require(
-            getOffplanProperties(_tokenId).isOffplan == true,
+            s_tokenIdToProperties[_tokenId].isOffplan == true,
             "Property not found"
         );
         require(_amountToOwn >= 1, "Max investment 1%");
@@ -215,9 +215,7 @@ contract NormalRental is ERC1155, Ownable {
                 revert NormalRental__ALREADY_HAVE_INSTALLMENTS_REMAINING();
             }
         }
-        Property storage offplanProperty = s_tokenIdToOffplanProperties[
-            _tokenId
-        ];
+        Property storage offplanProperty = s_tokenIdToProperties[_tokenId];
         unchecked {
             uint256 firstInstalmentDecAdjusted = _firstInstalment * DECIMALS;
             uint256 remainingsupplyOffplan = MAX_MINT_PER_PROPERTY -

@@ -109,7 +109,7 @@ const { network, getNamedAccounts, ethers, deployments } = require("hardhat");
 
           const newTokenId = await normalRental.getOffplanTokenIds();
 
-          const propertyListing = await normalRental.getOffplanProperties(
+          const propertyListing = await normalRental.getProperties(
             newTokenId[0]
           );
 
@@ -261,6 +261,48 @@ const { network, getNamedAccounts, ethers, deployments } = require("hardhat");
 
       describe("mint function", function () {
         let tokenId, amountToSubmit, price;
+        it("Should mint the shares for offplan properties", async () => {
+          price = BigInt(500000);
+          const seed = Math.floor(Math.random() * 11235);
+          const isOffplan = true;
+          await normalRental.addProperty(testURI, price, seed, isOffplan);
+          const tokenIds = await normalRental.getOffplanTokenIds();
+          tokenId = tokenIds[0];
+
+          // Buying usdt
+          const amountOutMin = 50000000000n;
+          const path = [
+            "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", //weth
+            "0xdac17f958d2ee523a2206206994597c13d831ec7", //usdt
+          ];
+
+          const deadline = Math.floor(Date.now() / 1000) + 60 * 10;
+          const transactionResponse = await routerV2.swapExactETHForTokens(
+            amountOutMin,
+            path,
+            deployer,
+            deadline,
+            {
+              value: ethers.parseEther("15"),
+            }
+          );
+          await transactionResponse.wait(1);
+          amountToSubmit = await usdt.balanceOf(deployer);
+
+          const amountToOwn = BigInt(10);
+          const contractUsdtBalanceBefore = await usdt.balanceOf(normalRental);
+          const approvalAmount = (price * amountToOwn) / BigInt(100);
+
+          await usdt.approve(normalRental.target, approvalAmount * BigInt(1e6));
+          const tx = await normalRental.mint(tokenId, amountToOwn);
+          await tx.wait(1);
+
+          const contractUsdtBalanceAfter = await usdt.balanceOf(normalRental);
+
+          expect(contractUsdtBalanceAfter).to.be.greaterThan(
+            contractUsdtBalanceBefore
+          );
+        });
         beforeEach(async () => {
           price = BigInt(20000);
           const seed = Math.floor(Math.random() * 7895);
@@ -518,9 +560,7 @@ const { network, getNamedAccounts, ethers, deployments } = require("hardhat");
           );
           await tx.wait(1);
 
-          const offplanPropery = await normalRental.getOffplanProperties(
-            tokenId
-          );
+          const offplanPropery = await normalRental.getProperties(tokenId);
 
           assert.equal(
             BigInt(offplanPropery.amountGenerated),
@@ -537,9 +577,7 @@ const { network, getNamedAccounts, ethers, deployments } = require("hardhat");
           );
           await tx.wait(1);
 
-          const offplanPropery = await normalRental.getOffplanProperties(
-            tokenId
-          );
+          const offplanPropery = await normalRental.getProperties(tokenId);
 
           assert.equal(offplanPropery.amountMinted, amountToOwn);
         });
@@ -559,9 +597,7 @@ const { network, getNamedAccounts, ethers, deployments } = require("hardhat");
           const investorInfoArray = await normalRental.getInstallments(tokenId);
           const investorRemainingAmountToPay =
             investorInfoArray[0].remainingInstalmentsAmount;
-          const offplanProperty = await normalRental.getOffplanProperties(
-            tokenId
-          );
+          const offplanProperty = await normalRental.getProperties(tokenId);
           const offplanPropertyPrice = offplanProperty.price;
           const investorSharePrice =
             (BigInt(offplanPropertyPrice) * BigInt(amountToOwn)) / BigInt(100);
