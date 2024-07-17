@@ -12,6 +12,10 @@ contract NormalRental is ERC1155, Ownable {
     error NormalRental__TRANSFER_FAILED_mint();
     error NormalRental__TRANSFER_FAILED_distributeRent();
     error NormalRental__TRANSFER_FAILED_mintOffplanInstalments();
+    error NormalRental__ALREADY_HAVE_INSTALLMENTS_REMAINING();
+    error NormalRental__NOT_IN_INSTALLMENTS();
+    error NormalRental__NO_INSTALLMENTS_REMAINING();
+    error NormalRental__TRANSFER_FAILED_payInstallments();
 
     /* Using SafeERC20 library because of transfer calls for usdt */
     using SafeERC20 for IERC20;
@@ -51,7 +55,7 @@ contract NormalRental is ERC1155, Ownable {
     mapping(uint256 => address[]) private s_tokenIdToInvestors;
     mapping(uint256 => Property) private s_tokenIdToOffplanProperties;
     mapping(uint256 => string) private s_offplanTokenIdToURIs;
-    mapping(uint256 => OffplanInvestor) private s_tokenIdToInstallments;
+    mapping(uint256 => OffplanInvestor[]) private s_tokenIdToInstallments;
 
     /* Events */
     event PropertyMinted(uint256 indexed tokenId_);
@@ -65,7 +69,6 @@ contract NormalRental is ERC1155, Ownable {
         i_usdt = IERC20(_usdtAddress);
         s_currentTokenID = 0;
     }
-
     //=================================Testing Done========================================//
 
     /**
@@ -128,7 +131,6 @@ contract NormalRental is ERC1155, Ownable {
             emit OffplanPropertyMinted(newTokenID);
         }
     }
-
     //=================================Testing Done========================================//
 
     /**
@@ -189,13 +191,13 @@ contract NormalRental is ERC1155, Ownable {
             revert NormalRental__TRANSFER_FAILED_mint();
         }
     }
-
     //=================================Testing Done========================================//
 
     /**
-     * **Unit Testing incomplete**
-     * Testing done for all the checks.
-     * Remaining tests for effects and interactions
+     * Allows the investors to hold a share of an off-plan property by installments
+     * @param _tokenId the id of the property token generated when admin adds the property
+     * @param _amountToOwn the % of shares an investor wants to own
+     * @param _firstInstalment the first installment a user is willing to pay
      */
     function mintOffplanInstallments(
         uint256 _tokenId,
@@ -208,10 +210,11 @@ contract NormalRental is ERC1155, Ownable {
         );
         require(_amountToOwn >= 1, "Max investment 1%");
         require(paused == false, "Minting Paused");
-        require(
-            s_tokenIdToInstallments[_tokenId].investor != msg.sender,
-            "Already have instalments"
-        );
+        for (uint256 i = 0; i < s_tokenIdToInstallments[_tokenId].length; i++) {
+            if (s_tokenIdToInstallments[_tokenId][i].investor == msg.sender) {
+                revert NormalRental__ALREADY_HAVE_INSTALLMENTS_REMAINING();
+            }
+        }
         Property storage offplanProperty = s_tokenIdToOffplanProperties[
             _tokenId
         ];
@@ -236,9 +239,7 @@ contract NormalRental is ERC1155, Ownable {
                     firstInstalmentDecAdjusted
                 )
             {
-                uint256 newAmountGeneratedOffplan = offplanProperty
-                    .amountGenerated + firstInstalmentDecAdjusted;
-                offplanProperty.amountGenerated = newAmountGeneratedOffplan;
+                offplanProperty.amountGenerated += firstInstalmentDecAdjusted;
                 offplanProperty.amountMinted += _amountToOwn;
 
                 uint256 amountToPay = (offplanProperty.price * _amountToOwn) /
@@ -246,9 +247,11 @@ contract NormalRental is ERC1155, Ownable {
                 uint256 remainingInstalments = amountToPay -
                     firstInstalmentDecAdjusted;
 
-                s_tokenIdToInstallments[_tokenId].investor = msg.sender;
-                s_tokenIdToInstallments[_tokenId]
-                    .remainingInstalmentsAmount = remainingInstalments;
+                OffplanInvestor memory offplanInvestor = OffplanInvestor({
+                    investor: msg.sender,
+                    remainingInstalmentsAmount: remainingInstalments
+                });
+                s_tokenIdToInstallments[_tokenId].push(offplanInvestor);
 
                 bool isInvestorPresent = false;
                 for (
@@ -259,9 +262,10 @@ contract NormalRental is ERC1155, Ownable {
                     if (s_tokenIdToInvestors[_tokenId][i] == msg.sender) {
                         isInvestorPresent = true;
                         break;
-                    } else {
-                        s_tokenIdToInvestors[_tokenId].push(msg.sender);
                     }
+                }
+                if (!isInvestorPresent) {
+                    s_tokenIdToInvestors[_tokenId].push(msg.sender);
                 }
                 _mint(msg.sender, _tokenId, _amountToOwn, "");
             } catch {
@@ -269,12 +273,54 @@ contract NormalRental is ERC1155, Ownable {
             }
         }
     }
+    //=================================Testing Done========================================//
 
-    function payInstallments(uint256 _tokenId) external {}
+    /**
+     * This is the basic structure of how installments payment would work
+     * For now installments timeline is for 6 months
+     * The installments that the investor is required to pay is are divided by 6
+     * Every time an investor calls this function the installment for that month will be deducted from
+     * Their wallets
+     */
+    function payInstallments(uint256 _tokenId) external {
+        bool foundInvestor = false;
 
-    ///////////////////////////////////////////
-    //              Testing Done             //
-    ///////////////////////////////////////////
+        for (uint256 i = 0; i < s_tokenIdToInstallments[_tokenId].length; i++) {
+            if (s_tokenIdToInstallments[_tokenId][i].investor == msg.sender) {
+                if (
+                    s_tokenIdToInstallments[_tokenId][i]
+                        .remainingInstalmentsAmount == 0
+                ) {
+                    revert NormalRental__NO_INSTALLMENTS_REMAINING();
+                }
+                foundInvestor = true;
+                uint256 installmentToPay = s_tokenIdToInstallments[_tokenId][i]
+                    .remainingInstalmentsAmount / 6;
+                try
+                    this.attemptTransfer(
+                        msg.sender,
+                        address(this),
+                        installmentToPay
+                    )
+                {
+                    uint256 amountAfterTransfer = s_tokenIdToInstallments[
+                        _tokenId
+                    ][i].remainingInstalmentsAmount - installmentToPay;
+                    s_tokenIdToInstallments[_tokenId][i]
+                        .remainingInstalmentsAmount = amountAfterTransfer;
+                    break;
+                } catch {
+                    revert NormalRental__TRANSFER_FAILED_payInstallments();
+                }
+            }
+        }
+
+        if (foundInvestor == false) {
+            revert NormalRental__NOT_IN_INSTALLMENTS();
+        }
+    }
+    //=================================Testing Done========================================//
+
     function submitRent(
         uint256 _usdtAmount,
         uint256 _tokenId
@@ -295,10 +341,8 @@ contract NormalRental is ERC1155, Ownable {
             revert NormalRental__TRANSFER_FAILED_submitRent();
         }
     }
+    //=================================Testing Done========================================//
 
-    ///////////////////////////////////////////
-    //              Testing Done             //
-    ///////////////////////////////////////////
     function distributeRent(uint256 _tokenId) external onlyOwner {
         require(s_tokenIdToRentGenerated[_tokenId] > 0, "Rent not generated");
         for (uint256 i = 0; i < s_tokenIdToInvestors[_tokenId].length; i++) {
@@ -309,10 +353,12 @@ contract NormalRental is ERC1155, Ownable {
             s_tokenIdToRentGenerated[_tokenId] -= amountToSend;
         }
     }
+    //=================================Testing Done========================================//
 
     function pause(bool _state) public onlyOwner {
         paused = _state;
     }
+    //=================================Testing Done========================================//
 
     /** Helper functions */
     function attemptTransfer(
@@ -410,5 +456,11 @@ contract NormalRental is ERC1155, Ownable {
         uint256 _tokenId
     ) public view returns (address[] memory) {
         return s_tokenIdToInvestors[_tokenId];
+    }
+
+    function getInstallments(
+        uint256 _tokenId
+    ) public view returns (OffplanInvestor[] memory) {
+        return s_tokenIdToInstallments[_tokenId];
     }
 }

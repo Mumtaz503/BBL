@@ -218,10 +218,9 @@ const { network, getNamedAccounts, ethers, deployments } = require("hardhat");
           const isOffplan = false;
           await normalRental.addProperty(testURI, price, seed, isOffplan);
           tokenId = await normalRental.getTokenId();
-          console.log("token Id", tokenId);
 
           //Buying USDT from Uniswap
-          const amountOutMin = 100;
+          const amountOutMin = 100000000n;
           const path = [
             "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", //weth
             "0xdac17f958d2ee523a2206206994597c13d831ec7", //usdt
@@ -269,10 +268,9 @@ const { network, getNamedAccounts, ethers, deployments } = require("hardhat");
           await normalRental.addProperty(testURI, price, seed, isOffplan);
           const tokenIds = await normalRental.getNormalTokenIds();
           tokenId = tokenIds[0];
-          console.log("token Id", tokenId);
 
           //Buying USDT from Uniswap
-          const amountOutMin = 30000n;
+          const amountOutMin = 30000000000n;
           const path = [
             "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", //weth
             "0xdac17f958d2ee523a2206206994597c13d831ec7", //usdt
@@ -399,7 +397,7 @@ const { network, getNamedAccounts, ethers, deployments } = require("hardhat");
           tokenId = tokenIds[0];
 
           //Buying USDT from Uniswap for testing
-          const amountOutMin = 30000n;
+          const amountOutMin = 30000000000n;
           const path = [
             "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", //weth
             "0xdac17f958d2ee523a2206206994597c13d831ec7", //usdt
@@ -465,7 +463,144 @@ const { network, getNamedAccounts, ethers, deployments } = require("hardhat");
           await usdt.approve(normalRental.target, BigInt(10000 * 1e6));
           await expect(
             normalRental.mintOffplanInstallments(tokenId, amountToOwn, 10000n)
-          ).to.be.revertedWith("Already have instalments");
+          ).to.be.revertedWithCustomError(
+            normalRental,
+            "NormalRental__ALREADY_HAVE_INSTALLMENTS_REMAINING()"
+          );
+        });
+        it("Should revert if amount to own is more than remaining supply", async () => {
+          const amountToOwn = 110n;
+          await usdt.approve(normalRental.target, BigInt(10000 * 1e6));
+
+          await expect(
+            normalRental.mintOffplanInstallments(tokenId, amountToOwn, 10000n)
+          ).to.be.revertedWith("Not enough supply");
+        });
+        it("Should revert if the user balance is less than required", async () => {
+          const amountToOwn = 10n;
+          await usdt
+            .connect(userSigner)
+            .approve(normalRental.target, BigInt(10000 * 1e6));
+          await expect(
+            normalRental
+              .connect(userSigner)
+              .mintOffplanInstallments(tokenId, amountToOwn, 10000n)
+          ).to.be.revertedWith("Not enough balance");
+        });
+        it("Should update the contract balance after transfer", async () => {
+          const amountToOwn = 10n;
+          const contractBalanceBefore = await usdt.balanceOf(
+            normalRental.target
+          );
+          await usdt.approve(normalRental.target, BigInt(10000 * 1e6));
+
+          const tx = await normalRental.mintOffplanInstallments(
+            tokenId,
+            amountToOwn,
+            10000n
+          );
+          await tx.wait(1);
+
+          const contractBalanceAfter = await usdt.balanceOf(
+            normalRental.target
+          );
+
+          assert(contractBalanceAfter > contractBalanceBefore);
+        });
+        it("Should update the offplan property amount generated", async () => {
+          const amountToOwn = 5n;
+          await usdt.approve(normalRental.target, BigInt(2000 * 1e6));
+
+          const tx = await normalRental.mintOffplanInstallments(
+            tokenId,
+            amountToOwn,
+            2000n
+          );
+          await tx.wait(1);
+
+          const offplanPropery = await normalRental.getOffplanProperties(
+            tokenId
+          );
+
+          assert.equal(
+            BigInt(offplanPropery.amountGenerated),
+            BigInt(2000 * 1e6)
+          );
+        });
+        it("Should update the amount minted for the offplan property", async () => {
+          const amountToOwn = 5n;
+          await usdt.approve(normalRental.target, BigInt(2000 * 1e6));
+          const tx = await normalRental.mintOffplanInstallments(
+            tokenId,
+            amountToOwn,
+            2000n
+          );
+          await tx.wait(1);
+
+          const offplanPropery = await normalRental.getOffplanProperties(
+            tokenId
+          );
+
+          assert.equal(offplanPropery.amountMinted, amountToOwn);
+        });
+        it("Should push the offplan investor's info", async () => {
+          const amountToOwn = 10n;
+          const firstInstallment = 2000;
+          await usdt.approve(normalRental.target, firstInstallment * 1e6);
+
+          const tx = await normalRental.mintOffplanInstallments(
+            tokenId,
+            amountToOwn,
+            firstInstallment
+          );
+
+          await tx.wait(1);
+
+          const investorInfoArray = await normalRental.getInstallments(tokenId);
+          const investorRemainingAmountToPay =
+            investorInfoArray[0].remainingInstalmentsAmount;
+          const offplanProperty = await normalRental.getOffplanProperties(
+            tokenId
+          );
+          const offplanPropertyPrice = offplanProperty.price;
+          const investorSharePrice =
+            (BigInt(offplanPropertyPrice) * BigInt(amountToOwn)) / BigInt(100);
+          assert.equal(
+            BigInt(investorSharePrice) - BigInt(investorRemainingAmountToPay),
+            BigInt(firstInstallment * 1e6)
+          );
+        });
+        it("Should push the investor Info in the array of mapping s_tokenIdToInvestors", async () => {
+          const amountToOwn = 5n;
+          await usdt.approve(normalRental.target, BigInt(2000 * 1e6));
+
+          const tx = await normalRental.mintOffplanInstallments(
+            tokenId,
+            amountToOwn,
+            2000
+          );
+          await tx.wait(1);
+
+          const investorsInfo = await normalRental.getInvestors(tokenId);
+          const investor = investorsInfo[0];
+          assert.equal(investor.toString(), deployer.toString());
+        });
+        it("Should mint the shares to the investor", async () => {
+          const amountToOwn = 10n;
+          await usdt.approve(normalRental.target, BigInt(10000 * 1e6));
+
+          const tx = await normalRental.mintOffplanInstallments(
+            tokenId,
+            amountToOwn,
+            10000
+          );
+          await tx.wait(1);
+
+          const investorShares = await normalRental.balanceOf(
+            deployer,
+            tokenId
+          );
+          assert.equal(investorShares, amountToOwn);
         });
       });
 
@@ -495,10 +630,9 @@ const { network, getNamedAccounts, ethers, deployments } = require("hardhat");
           tokenId = newTokenId;
 
           const propertyListing = await normalRental.getProperties(newTokenId);
-          console.log("Listed property: ", propertyListing);
 
           // Investor buys some usdt
-          const amountOutMin = 30000n;
+          const amountOutMin = 30000000000n;
           const path = [
             "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", //weth
             "0xdac17f958d2ee523a2206206994597c13d831ec7", //usdt
@@ -512,12 +646,10 @@ const { network, getNamedAccounts, ethers, deployments } = require("hardhat");
             });
           await transactionResponse.wait(1);
           amountToSubmit = await usdt.balanceOf(user);
-          console.log("Investor usdt balance: ", amountToSubmit);
 
           // Investor buys shares in the property
           const amountToOwn = BigInt(5);
           const approvalAmount = (price * amountToOwn) / BigInt(100);
-          console.log("Approval Amt: ", approvalAmount * BigInt(1e6));
 
           await usdt
             .connect(userSigner)
@@ -530,10 +662,9 @@ const { network, getNamedAccounts, ethers, deployments } = require("hardhat");
             user,
             newTokenId
           );
-          console.log("Investor Listing: ", investorListing);
 
           // Mimicing rent collection
-          const amountOutMinOwner = 58000n;
+          const amountOutMinOwner = 58000000000n;
           const pathOwner = [
             "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", //weth
             "0xdac17f958d2ee523a2206206994597c13d831ec7", //usdt
@@ -551,7 +682,6 @@ const { network, getNamedAccounts, ethers, deployments } = require("hardhat");
           );
           await transactionResponseOwner.wait(1);
           amountToSubmit = await usdt.balanceOf(deployer);
-          console.log("Owner usdt balance: ", amountToSubmit);
 
           //Rent submission
           await usdt.approve(normalRental.target, amountToSubmit);
@@ -565,6 +695,123 @@ const { network, getNamedAccounts, ethers, deployments } = require("hardhat");
           const userBalAfter = await usdt.connect(userSigner).balanceOf(user);
 
           assert(userBalAfter > userBal);
+        });
+      });
+      describe("payInstallments function", function () {
+        let tokenId, userBalance, installments;
+        /**
+         * We first need an admin to add an offplan property
+         * We then need a user to buy usdt from uniswap
+         * THe user will then mint the property's shares
+         * The user will then pay installments
+         */
+        beforeEach(async () => {
+          // Admin adds a property
+          const price = BigInt(500000);
+          const seed = Math.floor(Math.random() * 5561234);
+          const isOffplan = true;
+
+          const tx = await normalRental.addProperty(
+            testURI,
+            price,
+            seed,
+            isOffplan
+          );
+          await tx.wait(1);
+
+          const tokenIds = await normalRental.getOffplanTokenIds();
+          tokenId = tokenIds[0];
+
+          // Investor/user buys some usdt
+          const amountOutMin = 145000000000n;
+          const path = [
+            "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2", //weth
+            "0xdac17f958d2ee523a2206206994597c13d831ec7", //usdt
+          ];
+
+          const deadline = Math.floor(Date.now() / 1000) + 60 * 10;
+          const transactionResponse = await routerV2
+            .connect(userSigner)
+            .swapExactETHForTokens(amountOutMin, path, user, deadline, {
+              value: ethers.parseEther("43"),
+            });
+          await transactionResponse.wait(1);
+          userBalance = await usdt.balanceOf(user);
+
+          // The investor/user mints an offplan property with installments
+          const amountToOwn = 20n;
+          const firstInstallment = BigInt(30000);
+          await usdt
+            .connect(userSigner)
+            .approve(normalRental.target, firstInstallment * BigInt(1e6));
+          const tx2 = await normalRental
+            .connect(userSigner)
+            .mintOffplanInstallments(tokenId, amountToOwn, firstInstallment);
+          await tx2.wait(1);
+
+          installments = await normalRental.getInstallments(tokenId);
+        });
+        it("Should revert if not in installments", async () => {
+          await expect(
+            normalRental.payInstallments(tokenId)
+          ).to.be.revertedWithCustomError(
+            normalRental,
+            "NormalRental__NOT_IN_INSTALLMENTS()"
+          );
+        });
+        it("Should transfer the monthly rent to the contract", async () => {
+          const monthlyPayment =
+            BigInt(installments[0].remainingInstalmentsAmount) / BigInt(6);
+          const contractBalanceBefore = await usdt.balanceOf(
+            normalRental.target
+          );
+          const investorBalanceBefore = await usdt.balanceOf(user);
+
+          await usdt
+            .connect(userSigner)
+            .approve(normalRental.target, monthlyPayment);
+          const tx = await normalRental
+            .connect(userSigner)
+            .payInstallments(tokenId);
+          await tx.wait(1);
+
+          const investorBalanceAfter = await usdt.balanceOf(user);
+          const contractBalanceAfter = await usdt.balanceOf(
+            normalRental.target
+          );
+          assert(
+            BigInt(investorBalanceBefore) - BigInt(monthlyPayment),
+            BigInt(investorBalanceAfter)
+          );
+          assert(
+            BigInt(contractBalanceBefore) + BigInt(monthlyPayment),
+            BigInt(contractBalanceAfter)
+          );
+        });
+        it("Should update the contract information for installments", async () => {
+          const monthlyPayment =
+            BigInt(installments[0].remainingInstalmentsAmount) / BigInt(6);
+          const installmentAmountBefore =
+            installments[0].remainingInstalmentsAmount;
+
+          await usdt
+            .connect(userSigner)
+            .approve(normalRental.target, monthlyPayment);
+          const tx = await normalRental
+            .connect(userSigner)
+            .payInstallments(tokenId);
+          await tx.wait(1);
+
+          const remainingInstallmentsAfter = await normalRental.getInstallments(
+            tokenId
+          );
+          const installmentAmountAfter =
+            remainingInstallmentsAfter[0].remainingInstalmentsAmount;
+
+          assert(
+            BigInt(installmentAmountBefore) - BigInt(monthlyPayment),
+            BigInt(installmentAmountAfter)
+          );
         });
       });
       //////////////////////////////////////////////
